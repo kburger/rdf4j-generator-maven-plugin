@@ -1,0 +1,42 @@
+<project xmlns="http://maven.apache.org/POM/4.0.0" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+    xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+    
+    <groupId>com.github.kburger.maven.rdf4j.generator</groupId>
+    <artifactId>example1</artifactId>
+    <version>0.1.0-SNAPSHOT</version>
+    <packaging>jar</packaging>
+    
+    <build>
+        <plugins>
+            <plugin>
+                <groupId>com.github.kburger</groupId>
+                <artifactId>rdf4j-generator-maven-plugin</artifactId>
+                <version>0.1.0-SNAPSHOT</version>
+                <executions>
+                    <execution>
+                        <goals>
+                            <goal>generate</goal>
+                        </goals>
+                        <configuration>
+                            <outputDirectory>${project.build.outputDirectory}</outputDirectory>
+                            <package>com.example.vocab</package>
+                            <vocabularies>
+                                <vocabulary>
+                                    <url>https://www.w3.org/ns/dcat.ttl</url>
+                                    <prefix>dcat</prefix>
+                                    <namespace>http://www.w3.org/ns/dcat#</namespace>
+                                </vocabulary>
+                                <vocabulary>
+                                    <url>http://www.sparontologies.net/ontologies/datacite/source.ttl</url>
+                                    <prefix>datacite</prefix>
+                                    <namespace>http://purl.org/spar/datacite/</namespace>
+                                </vocabulary>
+                            </vocabularies>
+                        </configuration>
+                    </execution>
+                </executions>
+            </plugin>
+        </plugins>
+    </build>
+</project>
