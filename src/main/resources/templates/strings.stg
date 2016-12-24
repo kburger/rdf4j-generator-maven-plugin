@@ -1,0 +1,8 @@
+import "base.stg"
+
+@class.propdecl() ::= <<
+/**
+ *
+ */
+public static final String <prop.name; format="upper"> = NAMESPACE + "<prop.name>";
+>>
