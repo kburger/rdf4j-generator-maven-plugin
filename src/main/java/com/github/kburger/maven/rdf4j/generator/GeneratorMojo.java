@@ -1,10 +1,13 @@
 package com.github.kburger.maven.rdf4j.generator;
 
-import java.io.File;
+import java.io.BufferedWriter;
 import java.io.IOException;
-import java.io.StringWriter;
 import java.net.URL;
 import java.net.URLConnection;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.Paths;
 import java.time.ZonedDateTime;
 import java.util.ArrayList;
 import java.util.List;
@@ -16,11 +19,11 @@ import org.apache.maven.plugin.MojoFailureException;
 import org.apache.maven.plugins.annotations.LifecyclePhase;
 import org.apache.maven.plugins.annotations.Mojo;
 import org.apache.maven.plugins.annotations.Parameter;
+import org.apache.maven.project.MavenProject;
 import org.eclipse.rdf4j.model.IRI;
 import org.eclipse.rdf4j.model.Resource;
 import org.eclipse.rdf4j.model.Statement;
 import org.eclipse.rdf4j.model.Value;
-import org.eclipse.rdf4j.model.impl.SimpleIRI;
 import org.eclipse.rdf4j.model.impl.SimpleLiteral;
 import org.eclipse.rdf4j.model.impl.SimpleValueFactory;
 import org.eclipse.rdf4j.model.vocabulary.OWL;
@@ -44,8 +47,13 @@ public class GeneratorMojo extends AbstractMojo {
     /**
      * 
      */
-    @Parameter(required = true)
-    private File outputDirectory;
+    @Parameter(defaultValue = "${project}", readonly = true)
+    private MavenProject project;
+    /**
+     * 
+     */
+    @Parameter(required = true, defaultValue = "${project.build.directory}/generated-sources/")
+    private String outputDirectory;
     /**
      * 
      */
@@ -54,7 +62,7 @@ public class GeneratorMojo extends AbstractMojo {
     /**
      * 
      */
-    @Parameter(alias = "package", property = "package", required = true)
+    @Parameter(alias = "package", required = true)
     private String packageName;
     /**
      * 
@@ -91,10 +99,28 @@ public class GeneratorMojo extends AbstractMojo {
                 throw new MojoExecutionException("Could not parse vocabulary", e);
             }
             
-            StringWriter writer = new StringWriter();
-            writer.write(vcb.render());
-            getLog().info(writer.toString());
+            String packageDirectories = packageName.replace('.', '/');
+            Path root = Paths.get(outputDirectory, packageDirectories);
+            
+            try {
+                Files.createDirectories(root);
+            } catch (IOException e) {
+                throw new MojoExecutionException(e.getMessage());
+            }
+            
+            String filename = vocab.getPrefix().toUpperCase() + ".java";
+            Path file = Paths.get(outputDirectory, packageDirectories, filename);
+            try {
+                BufferedWriter writer = Files.newBufferedWriter(file, StandardCharsets.UTF_8);
+                writer.write(vcb.render());
+                writer.flush();
+                writer.close();
+            } catch (IOException e) {
+                getLog().error("Failed to write vocabulary to file", e);
+            }
         }
+        
+        project.addCompileSourceRoot(outputDirectory);
     }
     
     protected List<VocabularyProperty> parseVocabulary(Vocabulary vocab) throws IOException {
@@ -137,7 +163,7 @@ public class GeneratorMojo extends AbstractMojo {
         parser.parse(connection.getInputStream(), "");
         
         for (Resource clazz : classes) {
-            SimpleIRI iri = (SimpleIRI)clazz;
+            IRI iri = (IRI)clazz;
             
             VocabularyProperty property = new VocabularyProperty();
             property.setIri(iri);
@@ -147,11 +173,18 @@ public class GeneratorMojo extends AbstractMojo {
         }
         
         for (Resource objectProperty : objectProperties) {
-            SimpleIRI iri = (SimpleIRI)objectProperty;
+            IRI iri = (IRI)objectProperty;
             
             VocabularyProperty property = new VocabularyProperty();
             property.setIri(iri);
-            property.setName(iri.getLocalName());
+            
+            Optional<?> match = classes.stream().map(r -> ((IRI)r))
+                    .map(IRI::getLocalName)
+                    .filter(c -> c.equalsIgnoreCase(iri.getLocalName()))
+                    .findFirst();
+            String name = match.isPresent() ? "has_" + iri.getLocalName() : iri.getLocalName();
+            
+            property.setName(name);
             
             properties.add(property);
         }

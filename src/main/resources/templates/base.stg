@@ -10,7 +10,7 @@ class() ::= <<
 /**
  * Generated on <timestamp>.
  */
-public class <class> {
+public class <class; format="upper"> {
     public static final String NAMESPACE = "<namespace>";
     public static final String PREFIX = "<prefix>";
 
