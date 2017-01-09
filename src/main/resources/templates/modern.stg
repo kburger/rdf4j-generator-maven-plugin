@@ -1,0 +1,27 @@
+// rdf4j 2.x
+import "base.stg"
+
+@vocab.imports() ::= <<
+import org.eclipse.rdf4j.model.IRI;
+import org.eclipse.rdf4j.model.ValueFactory;
+import org.eclipse.rdf4j.model.impl.SimpleValueFactory;
+>>
+
+@class.propdecl() ::= <<
+/** \<tt><prop.iri>\</tt> */
+public static final IRI <prop.name; format="upper">;
+>>
+
+@class.staticinit() ::= <<
+static {
+    ValueFactory VF = SimpleValueFactory.getInstance();
+
+<properties :{prop|
+    <propdef(prop)>
+}>
+}
+>>
+
+propdef(prop) ::= <<
+<prop.name; format="upper"> = VF.createIRI("<prop.iri>");
+>>

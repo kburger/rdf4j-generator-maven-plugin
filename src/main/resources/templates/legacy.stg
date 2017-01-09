@@ -1,0 +1,27 @@
+// sesame 2.x
+import "base.stg"
+
+@vocab.imports() ::= <<
+import org.openrdf.model.URI;
+import org.openrdf.model.ValueFactory;
+import org.openrdf.model.impl.ValueFactoryImpl;
+>>
+
+@class.propdecl() ::= <<
+/** \<tt><prop.iri>\</tt> */
+public static final URI <prop.name; format="upper">;
+>>
+
+@class.staticinit() ::= <<
+static {
+    ValueFactory VF = BaseValueFactory.getInstance();
+    
+<properties :{prop|
+    <propdef(prop)>
+}>
+}
+>>
+
+propdef(prop) ::= <<
+<prop.name; format="upper"> = VF.createURI("<prop.iri>");
+>>

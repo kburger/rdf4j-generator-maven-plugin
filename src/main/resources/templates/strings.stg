@@ -1,0 +1,7 @@
+import "base.stg"
+
+@class.propdecl() ::= <<
+/** \<tt><prop.iri>\</tt> */
+public static final String <prop.name; format="upper"> = "<prop.iri>";
+
+>>
