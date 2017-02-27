@@ -101,21 +101,21 @@ public class GeneratorMojo extends AbstractMojo {
         for (Vocabulary vocab : vocabularies) {
             getLog().info("Parsing " + vocab.getUrl());
             
-            String tpl;
+            String template;
             switch (outputType) {
                 default:
                 case MODERN:
-                    tpl = "templates/modern.stg";
+                    template = "templates/modern.stg";
                     break;
                 case LEGACY:
-                    tpl = "templates/legacy.stg";
+                    template = "templates/legacy.stg";
                     break;
                 case STRINGS:
-                    tpl = "templates/strings.stg";
+                    template = "templates/strings.stg";
                     break;
             }
             
-            STGroup templates = new STGroupFile(tpl);
+            STGroup templates = new STGroupFile(template);
             templates.registerRenderer(String.class, new StringRenderer());
             
             ST vcb = templates.getInstanceOf("vocab");
