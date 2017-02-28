@@ -82,6 +82,11 @@ public class GeneratorMojo extends AbstractMojo {
     @Parameter(required = true)
     private Vocabulary[] vocabularies;
     // TOOD flag parameter to ignore vann?
+    /**
+     * Flag to add a 'javax.annotation.Generated' annotation to the generated classes. 
+     */
+    @Parameter(required = false, defaultValue = "true")
+    private boolean addGeneratedAnnotation;
     
     public void execute() throws MojoExecutionException, MojoFailureException {
         project.addCompileSourceRoot(outputDirectory);
@@ -127,6 +132,8 @@ public class GeneratorMojo extends AbstractMojo {
             }
             
             vcb.add("package", packageName);
+            vcb.add("addGeneratedAnnotation", addGeneratedAnnotation);
+            vcb.add("generator", this.getClass().getName());
             vcb.add("timestamp", ZonedDateTime.now());
             vcb.add("class", vocab.getPrefix());
             vcb.add("namespace", vocab.getNamespace());
