@@ -34,3 +34,10 @@ Maven plugin to generate RDF4J style vocabulary classes.
     </plugins>
 </build>
 ```
+
+## changelog
+0.2.0
+- added `addGeneratedAnnotation` parameter
+
+0.1.0
+- initial release
