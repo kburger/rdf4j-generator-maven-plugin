@@ -18,6 +18,7 @@ public final class <class; format="upper"> {
     <@propdecl()>
 }>
     <@staticinit()>
-}
+    
     private <class; format="upper">() {}
+}
 >>
