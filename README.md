@@ -35,9 +35,13 @@ Maven plugin to generate RDF4J style vocabulary classes.
 </build>
 ```
 
+See the [examples](examples) for more usage examples.
+
 ## changelog
 0.2.0
-- added `addGeneratedAnnotation` parameter
+- added `addGeneratedAnnotation` parameter to mark the generated classes as 'generated'
+- added `cacheFiles` parameter to cache remote files locally
+- added `includeDeprecated` parameter to in/exclude deprecated RDF types/properties.
 
 0.1.0
 - initial release
