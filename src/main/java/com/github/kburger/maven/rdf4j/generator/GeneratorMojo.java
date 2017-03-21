@@ -30,6 +30,7 @@ import org.eclipse.rdf4j.model.Resource;
 import org.eclipse.rdf4j.model.Statement;
 import org.eclipse.rdf4j.model.Value;
 import org.eclipse.rdf4j.model.ValueFactory;
+import org.eclipse.rdf4j.model.impl.SimpleLiteral;
 import org.eclipse.rdf4j.model.impl.SimpleValueFactory;
 import org.eclipse.rdf4j.model.vocabulary.OWL;
 import org.eclipse.rdf4j.model.vocabulary.RDF;
@@ -104,6 +105,11 @@ public class GeneratorMojo extends AbstractMojo {
      */
     @Parameter(required = false, defaultValue = "true")
     private boolean cacheFiles;
+    /**
+     * Flag to indicate whether properties or classes marked deprecated should be included.
+     */
+    @Parameter(required = false, defaultValue = "false")
+    private boolean includeDeprecated;
     /**
      * Location of the local .m2 repository.
      */
@@ -201,6 +207,7 @@ public class GeneratorMojo extends AbstractMojo {
         
         List<IRI> classes = new ArrayList<>();
         List<IRI> properties = new ArrayList<>();
+        List<IRI> deprecated = new ArrayList<>();
         
         parser.setRDFHandler(new AbstractRDFHandler() {
             @Override
@@ -220,6 +227,7 @@ public class GeneratorMojo extends AbstractMojo {
             public void handleStatement(Statement st) throws RDFHandlerException {
                 Resource s = st.getSubject();
                 IRI p = st.getPredicate();
+                Value o = st.getObject();
                 
                 if (s instanceof IRI) {
                     String namespace = ((IRI)s).getNamespace();
@@ -229,8 +237,6 @@ public class GeneratorMojo extends AbstractMojo {
                 }
                 
                 if (p.equals(RDF.TYPE)) {
-                    Value o = st.getObject();
-                    
                     if (o.equals(OWL.CLASS) || o.equals(RDFS.CLASS)) {
                         if (!classes.contains(s)) {
                             classes.add((IRI)s);
@@ -242,6 +248,8 @@ public class GeneratorMojo extends AbstractMojo {
                             properties.add((IRI)s);
                         }
                     }
+                } else if (p.equals(OWL_DEPRECATED) && ((SimpleLiteral)o).booleanValue()) {
+                    deprecated.add((IRI)s);
                 }
             }
         });
@@ -253,12 +261,22 @@ public class GeneratorMojo extends AbstractMojo {
             throw new MojoExecutionException("", e);
         }
         
+        if (!includeDeprecated) {
+            classes.removeAll(deprecated);
+            properties.removeAll(deprecated);
+        }
+        
         List<VocabularyProperty> vocabProperties = new ArrayList<>(classes.size() + properties.size());
         
         for (IRI clazz : classes) {
             VocabularyProperty p = new VocabularyProperty();
             p.setIri(clazz);
             p.setName(clazz.getLocalName());
+            
+            if (includeDeprecated && deprecated.contains(clazz)) {
+                p.setDeprecated(true);
+            }
+            
             vocabProperties.add(p);
         }
         
@@ -278,6 +296,11 @@ public class GeneratorMojo extends AbstractMojo {
                     .findFirst();
             if (!clash.isPresent()) {
                 p.setName(name);
+                
+                if (includeDeprecated && deprecated.contains(property)) {
+                    p.setDeprecated(true);
+                }
+                
                 vocabProperties.add(p);
             }
         }
