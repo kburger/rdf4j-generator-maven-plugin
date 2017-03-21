@@ -13,11 +13,15 @@ public final class <class; format="upper"> {
     public static final String PREFIX = "<prefix>";
 
 <properties :{prop|
+    /** \<tt><prop.iri>\</tt> */
+    <if(prop.deprecated)>@Deprecated<endif>
     <@propdecl()>
 }>
     <@staticinit()>
     
-    private <class; format="upper">() {}
+    /** Utility class; private constructor to prevent instance being created. */
+    private <class; format="upper">() {
+    }
 }
 >>
 

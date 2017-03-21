@@ -1,13 +1,18 @@
 package com.github.kburger.maven.rdf4j.generator;
 
+import static com.google.common.io.Files.getFileExtension;
+
 import java.io.BufferedWriter;
+import java.io.File;
 import java.io.IOException;
+import java.io.InputStream;
 import java.net.URL;
 import java.net.URLConnection;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
+import java.nio.file.StandardCopyOption;
 import java.time.ZonedDateTime;
 import java.util.ArrayList;
 import java.util.List;
@@ -24,6 +29,7 @@ import org.eclipse.rdf4j.model.IRI;
 import org.eclipse.rdf4j.model.Resource;
 import org.eclipse.rdf4j.model.Statement;
 import org.eclipse.rdf4j.model.Value;
+import org.eclipse.rdf4j.model.ValueFactory;
 import org.eclipse.rdf4j.model.impl.SimpleLiteral;
 import org.eclipse.rdf4j.model.impl.SimpleValueFactory;
 import org.eclipse.rdf4j.model.vocabulary.OWL;
@@ -43,13 +49,21 @@ import com.google.common.net.HttpHeaders;
 
 @Mojo(name = "generate", defaultPhase = LifecyclePhase.GENERATE_SOURCES)
 public class GeneratorMojo extends AbstractMojo {
-    // TODO remove once the plugin can bootstrap itself
-    private static final IRI OWL_DEPRECATED = SimpleValueFactory.getInstance()
-            .createIRI(OWL.NAMESPACE, "deprecated");
-    private static final IRI VANN_PREFERREDNAMESPACEURI = SimpleValueFactory.getInstance()
-            .createIRI("http://purl.org/vocab/vann/", "preferredNamespaceUri");
-    private static final IRI VANN_PREFERREDNAMESPACEPREFIX = SimpleValueFactory.getInstance()
-            .createIRI("http://purl.org/vocab/vann/", "preferredNamespacePrefix");
+    private static final String CACHE_DIR = ".cache";
+    private static final String PLUGIN_CACHE_DIR = "rdf4j-generator";
+    
+    // FIXME remove once the plugin can bootstrap itself?
+    private static final IRI OWL_DEPRECATED;
+    private static final IRI VANN_PREFERREDNAMESPACEURI;
+    private static final IRI VANN_PREFERREDNAMESPACEPREFIX;
+    
+    static {
+        ValueFactory factory = SimpleValueFactory.getInstance();
+        
+        OWL_DEPRECATED = factory.createIRI(OWL.NAMESPACE, "deprecated");
+        VANN_PREFERREDNAMESPACEURI = factory.createIRI("http://purl.org/vocab/vann/", "preferredNamespaceUri");
+        VANN_PREFERREDNAMESPACEPREFIX = factory.createIRI("http://purl.org/vocab/vann/", "preferredNamespacePrefix");
+    }
     
     /**
      * Maven project reference.
@@ -81,175 +95,269 @@ public class GeneratorMojo extends AbstractMojo {
      */
     @Parameter(required = true)
     private Vocabulary[] vocabularies;
-    // TOOD flag parameter to ignore vann?
     /**
      * Flag to add a 'javax.annotation.Generated' annotation to the generated classes. 
      */
     @Parameter(required = false, defaultValue = "true")
     private boolean addGeneratedAnnotation;
+    /**
+     * Flag to indicate whether files are to be cached.
+     */
+    @Parameter(required = false, defaultValue = "true")
+    private boolean cacheFiles;
+    /**
+     * Flag to indicate whether properties or classes marked deprecated should be included.
+     */
+    @Parameter(required = false, defaultValue = "false")
+    private boolean includeDeprecated;
+    /**
+     * Location of the local .m2 repository.
+     */
+    @Parameter(defaultValue = "${settings.localRepository}", readonly = true)
+    private String localRepository;
     
+    @Override
     public void execute() throws MojoExecutionException, MojoFailureException {
+        getLog().debug("Adding " + outputDirectory + " as compile source root");
         project.addCompileSourceRoot(outputDirectory);
         
-        String packageDirectories = packageName.replace('.', '/');
-        Path root = Paths.get(outputDirectory, packageDirectories);
-        
-        // This is a dirty workaround and only works if outputDirectory points to 'target' folder.
-        // Needs proper design and logic ASAP.
-        if (!overwrite && Files.exists(root)) {
-            getLog().info("Path " + root + " already exists and overwrite flag is false, skipping");
-            return;
-        }
-        
-        getLog().info("Parsing " + vocabularies.length + " vocabularies");
-        
-        for (Vocabulary vocab : vocabularies) {
-            getLog().info("Parsing " + vocab.getUrl());
+        for (Vocabulary vocabulary : vocabularies) {
+            getLog().info("Parsing " + vocabulary.getUrl());
             
-            String template;
-            switch (outputType) {
-                default:
-                case MODERN:
-                    template = "templates/modern.stg";
-                    break;
-                case LEGACY:
-                    template = "templates/legacy.stg";
-                    break;
-                case STRINGS:
-                    template = "templates/strings.stg";
-                    break;
-            }
-            
-            STGroup templates = new STGroupFile(template);
-            templates.registerRenderer(String.class, new StringRenderer());
-            
-            ST vcb = templates.getInstanceOf("vocab");
-
+            InputStream inputStream;
             try {
-                vcb.add("properties", parseVocabulary(vocab));
+                inputStream = getFileInputStream(vocabulary.getUrl(), cacheFiles);
             } catch (IOException e) {
-                throw new MojoExecutionException("Could not parse vocabulary", e);
+                getLog().error("Could not get file from " + vocabulary.getUrl(), e);
+                throw new MojoExecutionException("Could not get file from " + vocabulary.getUrl(), e);
             }
             
-            vcb.add("package", packageName);
-            vcb.add("addGeneratedAnnotation", addGeneratedAnnotation);
-            vcb.add("generator", this.getClass().getName());
-            vcb.add("timestamp", ZonedDateTime.now());
-            vcb.add("class", vocab.getPrefix());
-            vcb.add("namespace", vocab.getNamespace());
-            vcb.add("prefix", vocab.getPrefix());
+            getLog().debug("Input stream retrieved, continueing to parsing the file");
             
+            RDFFormat format;
             try {
-                Files.createDirectories(root);
+                format = getRdfFormat(vocabulary.getUrl());
             } catch (IOException e) {
-                throw new MojoExecutionException(e.getMessage());
+                throw new MojoExecutionException("Coult not get RDF format for " + vocabulary.getUrl(), e);
             }
             
-            String filename = vocab.getPrefix().toUpperCase() + ".java";
-            Path file = Paths.get(outputDirectory, packageDirectories, filename);
+            List<VocabularyProperty> properties = parseVocabulary(vocabulary, format, inputStream);
             
-            try (BufferedWriter writer = Files.newBufferedWriter(file, StandardCharsets.UTF_8)) {
-                writer.write(vcb.render());
-            } catch (IOException e) {
-                getLog().error("Failed to write vocabulary to file", e);
-            }
+            writeSourceFile(vocabulary, properties);
         }
     }
     
-    protected List<VocabularyProperty> parseVocabulary(Vocabulary vocab) throws IOException {
-        URL url = vocab.getUrl();
-        URLConnection connection = url.openConnection();
+    private InputStream getFileInputStream(URL url, boolean cache) throws IOException, MojoExecutionException {
+        if (cache) {
+            getLog().debug("Checking for " + url + " in cache");
+            
+            Path cacheDirectory = Paths.get(localRepository, CACHE_DIR, PLUGIN_CACHE_DIR);
+            Files.createDirectories(cacheDirectory);
+            getLog().debug("Cache base directory is " + cacheDirectory);
+            
+            String fileName = new File(url.getFile()).getName();
+            String extension = getFileExtension(fileName);
+            
+            getLog().debug("File name and extension are '" + fileName + "' and '" + extension + "'");
+            
+            if ("".equals(extension)) {
+                getLog().debug("Extension is empty, trying to resolve it");
+                
+                RDFFormat format = getRdfFormat(url);
+                
+                extension = format.getDefaultFileExtension();
+                fileName += "." + extension;
+                getLog().debug("Determined extension on " + extension);
+            }
+            
+            Path fileLocation = Paths.get(localRepository, ".cache", "rdf4j-generator", fileName);
+            getLog().debug("File location is " + fileLocation);
+            
+            if (!Files.exists(fileLocation)) {
+                getLog().debug("File does not exist yet, downloading it");
+                URLConnection connection = url.openConnection();
+                connection.setRequestProperty(HttpHeaders.ACCEPT, "text/turtle;q=1,application/rdf+xml;q=0.5");
+                Files.copy(connection.getInputStream(), fileLocation, StandardCopyOption.REPLACE_EXISTING);
+                getLog().debug("File downloaded");
+            }
+            
+            getLog().debug("Returning cached file");
+            return Files.newInputStream(fileLocation);
+        } else {
+            getLog().debug("Cache was disabled, so returning URL stream content");
+            return url.openStream();
+        }
+    }
+    
+    private RDFFormat getRdfFormat(URL url) throws IOException {
+        Optional<RDFFormat> format = Rio.getParserFormatForFileName(url.getPath());
         
-        Optional<RDFFormat> format = Rio.getParserFormatForFileName(url.getPath()); 
         if (!format.isPresent()) {
-            connection.setRequestProperty(HttpHeaders.ACCEPT, "text/turtle, application/rdf+xml");
-            format = Rio.getParserFormatForMIMEType(connection.getContentType()); // TODO handle null from getContentType
+            URLConnection connection = url.openConnection();
+            
+            connection.setRequestProperty(HttpHeaders.ACCEPT, "text/turtle;q=1,application/rdf+xml;q=0.5");
+            format = Rio.getParserFormatForMIMEType(connection.getContentType());
         }
         
-        RDFParser parser = Rio.createParser(format.orElse(RDFFormat.TURTLE));
+        return format.orElse(RDFFormat.TURTLE);
+    }
+    
+    private List<VocabularyProperty> parseVocabulary(Vocabulary vocabulary, RDFFormat format, InputStream inputStream) throws MojoExecutionException {
+        RDFParser parser = Rio.createParser(format);
         
-        List<Resource> classes = new ArrayList<>();
-        List<Resource> objectProperties = new ArrayList<>();
-        List<Resource> deprecated = new ArrayList<>();
+        List<IRI> classes = new ArrayList<>();
+        List<IRI> properties = new ArrayList<>();
+        List<IRI> deprecated = new ArrayList<>();
         
         parser.setRDFHandler(new AbstractRDFHandler() {
+            @Override
+            public void handleNamespace(String prefix, String uri) throws RDFHandlerException {
+                if (uri.equals(vocabulary.getUrl().toString())) {
+                    if (vocabulary.getPrefix() == null) {
+                        vocabulary.setPrefix(prefix);
+                    }
+                    
+                    if (vocabulary.getNamespace() == null) {
+                        vocabulary.setNamespace(uri);
+                    }
+                }
+            }
+            
             @Override
             public void handleStatement(Statement st) throws RDFHandlerException {
                 Resource s = st.getSubject();
                 IRI p = st.getPredicate();
                 Value o = st.getObject();
                 
-                if (p.equals(RDF.TYPE) && (o.equals(OWL.CLASS) || o.equals(RDFS.CLASS))) {
-                    if (!classes.contains(s)) {
-                        classes.add(s);
+                if (s instanceof IRI) {
+                    String namespace = ((IRI)s).getNamespace();
+                    if (!namespace.equals(vocabulary.getNamespace())) {
+                        return;
                     }
-                } else if (p.equals(RDF.TYPE) && 
-                        (o.equals(OWL.OBJECTPROPERTY) || o.equals(OWL.DATATYPEPROPERTY) || o.equals(RDF.PROPERTY))) {
-                    if (!objectProperties.contains(s)) {
-                        objectProperties.add(s);
-                    }
-                } else if (p.equals(OWL_DEPRECATED) && ((SimpleLiteral)o).booleanValue()) {
-                    deprecated.add(s);
                 }
                 
-                else if (p.equals(VANN_PREFERREDNAMESPACEURI) && vocab.getNamespace() == null) {
-                    vocab.setNamespace(o.stringValue());
-                } else if (p.equals(VANN_PREFERREDNAMESPACEPREFIX) && vocab.getPrefix() == null) {
-                    vocab.setPrefix(o.stringValue());
-                }
-            }
-            
-            @Override
-            public void handleNamespace(String prefix, String uri) throws RDFHandlerException {
-                if (uri.equals(vocab.getUrl().toString())) {
-                    if (vocab.getPrefix() == null) {
-                        vocab.setPrefix(prefix);
+                if (p.equals(RDF.TYPE)) {
+                    if (o.equals(OWL.CLASS) || o.equals(RDFS.CLASS)) {
+                        if (!classes.contains(s)) {
+                            classes.add((IRI)s);
+                        }
                     }
                     
-                    if (vocab.getNamespace() == null) {
-                        vocab.setNamespace(uri);
+                    if (o.equals(OWL.OBJECTPROPERTY) || o.equals(OWL.DATATYPEPROPERTY) || o.equals(RDF.PROPERTY)) {
+                        if (!properties.contains(s)) {
+                            properties.add((IRI)s);
+                        }
                     }
+                } else if (p.equals(OWL_DEPRECATED) && ((SimpleLiteral)o).booleanValue()) {
+                    deprecated.add((IRI)s);
                 }
             }
         });
-        parser.parse(connection.getInputStream(), "");
         
-        List<VocabularyProperty> properties = new ArrayList<>();
-        
-        for (Resource clazz : classes) {
-            IRI iri = (IRI)clazz;
-            
-            VocabularyProperty property = new VocabularyProperty();
-            property.setIri(iri);
-            property.setName(iri.getLocalName());
-            
-            properties.add(property);
+        try {
+            parser.parse(inputStream, "");
+        } catch (IOException e) {
+            getLog().warn("Could not parse " + vocabulary.getUrl() + ": " + e.getMessage(), e);
+            throw new MojoExecutionException("", e);
         }
         
-        for (Resource objectProperty : objectProperties) {
-            IRI iri = (IRI)objectProperty;
+        if (!includeDeprecated) {
+            classes.removeAll(deprecated);
+            properties.removeAll(deprecated);
+        }
+        
+        List<VocabularyProperty> vocabProperties = new ArrayList<>(classes.size() + properties.size());
+        
+        for (IRI clazz : classes) {
+            VocabularyProperty p = new VocabularyProperty();
+            p.setIri(clazz);
+            p.setName(clazz.getLocalName());
             
-            VocabularyProperty property = new VocabularyProperty();
-            property.setIri(iri);
+            if (includeDeprecated && deprecated.contains(clazz)) {
+                p.setDeprecated(true);
+            }
             
-            Optional<?> match = classes.stream().map(r -> (IRI)r)
+            vocabProperties.add(p);
+        }
+        
+        for (IRI property : properties) {
+            VocabularyProperty p = new VocabularyProperty();
+            p.setIri(property);
+            
+            Optional<?> match = classes.stream()
                     .map(IRI::getLocalName)
-                    .filter(c -> c.equalsIgnoreCase(iri.getLocalName()))
-                    .findFirst();
-            String name = match.isPresent() ? "has_" + iri.getLocalName() : iri.getLocalName();
+                    .filter(clazz -> clazz.equalsIgnoreCase(property.getLocalName()))
+                    .findAny();
+            String name = match.isPresent() ? "has_" + property.getLocalName() : property.getLocalName();
             
-            // Bit of a workaround, needs a proper solution. Main problem is foaf, which provides
-            // 'givenName' and 'givenname'. Capitalized that produces a duplicate. 
-            Optional<?> clash = properties.stream()
+            Optional<?> clash = vocabProperties.stream()
                     .map(VocabularyProperty::getName)
-                    .filter(n -> name.equalsIgnoreCase(n))
+                    .filter(name::equalsIgnoreCase)
                     .findFirst();
             if (!clash.isPresent()) {
-                property.setName(name);
-                properties.add(property);
+                p.setName(name);
+                
+                if (includeDeprecated && deprecated.contains(property)) {
+                    p.setDeprecated(true);
+                }
+                
+                vocabProperties.add(p);
             }
         }
         
-        return properties;
+        return vocabProperties;
+    }
+    
+    private void writeSourceFile(Vocabulary vocabulary, List<VocabularyProperty> properties) {
+        String template;
+        switch (outputType) {
+            default:
+            case MODERN:
+                template = "templates/modern.stg";
+                break;
+            case LEGACY:
+                template = "templates/legacy.stg";
+                break;
+            case STRINGS:
+                template = "templates/strings.stg";
+                break;
+        }
+        
+        STGroup templates = new STGroupFile(template);
+        templates.registerRenderer(String.class, new StringRenderer());
+        
+        ST vocab = templates.getInstanceOf("vocab");
+        
+        vocab.add("package", packageName);
+        vocab.add("addGeneratedAnnotation", addGeneratedAnnotation);
+        vocab.add("generator", this.getClass().getName());
+        vocab.add("timestamp", ZonedDateTime.now());
+        vocab.add("class", vocabulary.getPrefix());
+        vocab.add("namespace", vocabulary.getNamespace());
+        vocab.add("prefix", vocabulary.getPrefix());
+        vocab.add("properties", properties);
+        
+        // create the package hierarchy
+        String hierarchy = packageName.replace('.', '/');
+        Path root = Paths.get(outputDirectory, hierarchy);
+        
+        try {
+            Files.createDirectories(root);
+        } catch (IOException e) {
+            getLog().warn("Could not create package hierarchy " + root + ": " + e.getMessage(), e);
+        }
+        
+        String fileName = vocabulary.getPrefix().toUpperCase() + ".java";
+        Path path = Paths.get(outputDirectory, hierarchy, fileName);
+        
+        if (!overwrite && Files.exists(path)) {
+            getLog().info(path + " already exists and overwrite is set to false, skipping");
+        } else {
+            try (BufferedWriter writer = Files.newBufferedWriter(path, StandardCharsets.UTF_8)) {
+                writer.write(vocab.render());
+            } catch (IOException e) {
+                getLog().warn("Could not write file " + path + ": " + e.getMessage(), e);
+            }
+        }
     }
 }

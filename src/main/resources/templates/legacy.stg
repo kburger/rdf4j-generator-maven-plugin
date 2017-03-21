@@ -8,8 +8,8 @@ import org.openrdf.model.impl.ValueFactoryImpl;
 >>
 
 @class.propdecl() ::= <<
-/** \<tt><prop.iri>\</tt> */
 public static final URI <prop.name; format="upper">;
+
 >>
 
 @class.staticinit() ::= <<

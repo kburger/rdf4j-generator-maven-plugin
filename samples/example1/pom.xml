@@ -7,11 +7,15 @@
     <version>0.2.0-SNAPSHOT</version>
     <packaging>jar</packaging>
     
+    <properties>
+        <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+    </properties>
+    
     <dependencies>
         <dependency>
             <groupId>org.eclipse.rdf4j</groupId>
             <artifactId>rdf4j-model</artifactId>
-            <version>2.1.4</version>
+            <version>2.2</version>
         </dependency>
     </dependencies>
     
@@ -28,16 +32,14 @@
                         </goals>
                         <configuration>
                             <package>com.example.vocab</package>
+                            <includeDeprecated>true</includeDeprecated>
                             <vocabularies>
                                 <vocabulary>
-                                    <url>https://www.w3.org/ns/dcat.ttl</url>
-                                    <prefix>dcat</prefix>
-                                    <namespace>http://www.w3.org/ns/dcat#</namespace>
+                                    <url>http://www.w3.org/ns/dcat#</url>
                                 </vocabulary>
                                 <vocabulary>
-                                    <url>http://www.sparontologies.net/ontologies/datacite/source.ttl</url>
+                                    <url>http://purl.org/spar/datacite/</url>
                                     <prefix>datacite</prefix>
-                                    <namespace>http://purl.org/spar/datacite/</namespace>
                                 </vocabulary>
                             </vocabularies>
                         </configuration>
