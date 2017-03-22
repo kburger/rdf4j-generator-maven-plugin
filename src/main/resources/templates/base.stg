@@ -1,4 +1,4 @@
-vocab(package, timestamp, class, namespace, prefix, properties) ::= <<
+vocab(package, addGeneratedAnnotation, generator, timestamp, class, namespace, prefix, properties) ::= <<
 package <package>;
 
 <@imports()>
@@ -7,16 +7,26 @@ package <package>;
 >>
 
 class() ::= <<
-/**
- * Generated on <timestamp>.
- */
-public class <class; format="upper"> {
+<generated()>
+public final class <class; format="upper"> {
     public static final String NAMESPACE = "<namespace>";
     public static final String PREFIX = "<prefix>";
 
 <properties :{prop|
+    /** \<tt><prop.iri>\</tt> */
+    <if(prop.deprecated)>@Deprecated<endif>
     <@propdecl()>
 }>
     <@staticinit()>
+    
+    /** Utility class; private constructor to prevent instance being created. */
+    private <class; format="upper">() {
+    }
 }
+>>
+
+generated() ::= <<
+<if(addGeneratedAnnotation)>@javax.annotation.Generated(
+    value = "<generator>",
+    date = "<timestamp>")<endif>
 >>
