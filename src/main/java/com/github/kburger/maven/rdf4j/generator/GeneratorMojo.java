@@ -229,7 +229,13 @@ public class GeneratorMojo extends AbstractMojo {
                 IRI p = st.getPredicate();
                 Value o = st.getObject();
                 
-                if (s instanceof IRI) {
+                if (p.equals(VANN_PREFERREDNAMESPACEURI) && vocabulary.getNamespace() == null) {
+                    vocabulary.setNamespace(o.stringValue());
+                } else if (p.equals(VANN_PREFERREDNAMESPACEPREFIX) && vocabulary.getPrefix() == null) {
+                    vocabulary.setPrefix(o.stringValue());
+                }
+                
+                if (s instanceof IRI && vocabulary.getNamespace() != null) {
                     String namespace = ((IRI)s).getNamespace();
                     if (!namespace.equals(vocabulary.getNamespace())) {
                         return;
