@@ -3,7 +3,6 @@ package com.github.kburger.maven.rdf4j.generator;
 import static com.google.common.io.Files.getFileExtension;
 
 import java.io.BufferedWriter;
-import java.io.File;
 import java.io.IOException;
 import java.io.InputStream;
 import java.net.URL;
@@ -51,6 +50,14 @@ import com.google.common.net.HttpHeaders;
 public class GeneratorMojo extends AbstractMojo {
     private static final String CACHE_DIR = ".cache";
     private static final String PLUGIN_CACHE_DIR = "rdf4j-generator";
+    
+    /**
+     * Constructing a custom http Accept header instead of using {@link
+     * RDFFormat#getAcceptParams(Iterable, boolean, RDFFormat)}. The custom order of content types
+     * is picked up by servers that choose to ignore the quality parameter, and solely base the
+     * content negotation on priority.
+     */
+    private static final String CUSTOM_ACCEPT_HEADER = "text/turtle;q=1,application/rdf+xml;q=0.5";
     
     // FIXME remove once the plugin can bootstrap itself?
     private static final IRI OWL_DEPRECATED;
@@ -147,7 +154,18 @@ public class GeneratorMojo extends AbstractMojo {
         }
     }
     
-    private InputStream getFileInputStream(URL url, boolean cache) throws IOException, MojoExecutionException {
+    /**
+     * Retrieves an {@link InputStream} for the given URL. The inputstream could point to the remote
+     * source, or to a local cached copy, depening on the {@code cache} parameter. If the {@code
+     * cache} parameter is {@code true} and there is not yet a local copy, the local copy will be
+     * created and returned inputstream will point to the newly created local copy.
+     * @param url the (remote) location of the file.
+     * @param cache whether to check for (and download if absent) a local copy of the file.
+     * @return an inputstream pointing to the content of the given {@code url}.
+     * @throws IOException if anything goes wrong while retrieving the remote content or during
+     *         caching of the file locally.
+     */
+    private InputStream getFileInputStream(URL url, boolean cache) throws IOException {
         if (cache) {
             getLog().debug("Checking for " + url + " in cache");
             
@@ -155,8 +173,13 @@ public class GeneratorMojo extends AbstractMojo {
             Files.createDirectories(cacheDirectory);
             getLog().debug("Cache base directory is " + cacheDirectory);
             
-            String fileName = new File(url.getFile()).getName();
-            String extension = getFileExtension(fileName);
+            String fileName = url.getHost() + url.getPath();
+            if (fileName.endsWith("/")) {
+                fileName = fileName.substring(0, fileName.length() - 1);
+            }
+            fileName = fileName.replaceAll("[\\./]", "_");
+            
+            String extension = getFileExtension(url.getPath());
             
             getLog().debug("File name and extension are '" + fileName + "' and '" + extension + "'");
             
@@ -176,7 +199,9 @@ public class GeneratorMojo extends AbstractMojo {
             if (!Files.exists(fileLocation)) {
                 getLog().debug("File does not exist yet, downloading it");
                 URLConnection connection = url.openConnection();
-                connection.setRequestProperty(HttpHeaders.ACCEPT, "text/turtle;q=1,application/rdf+xml;q=0.5");
+                connection.setRequestProperty(HttpHeaders.ACCEPT, CUSTOM_ACCEPT_HEADER);
+                
+                getLog().info("Downloading " + url);
                 Files.copy(connection.getInputStream(), fileLocation, StandardCopyOption.REPLACE_EXISTING);
                 getLog().debug("File downloaded");
             }
@@ -189,19 +214,36 @@ public class GeneratorMojo extends AbstractMojo {
         }
     }
     
+    /**
+     * Tries to determine the RDF format of the given URL. If the format could not be determined,
+     * the default value of {@link RDFFormat#TURTLE} will be returned.
+     * @param url location of an RDF document.
+     * @return the resolved format of the RDF document, or {@code turtle} if the resolving failed.
+     * @throws IOException if an error occured during retrieval of the RDF document.
+     */
     private RDFFormat getRdfFormat(URL url) throws IOException {
         Optional<RDFFormat> format = Rio.getParserFormatForFileName(url.getPath());
         
         if (!format.isPresent()) {
             URLConnection connection = url.openConnection();
             
-            connection.setRequestProperty(HttpHeaders.ACCEPT, "text/turtle;q=1,application/rdf+xml;q=0.5");
+            connection.setRequestProperty(HttpHeaders.ACCEPT, CUSTOM_ACCEPT_HEADER);
             format = Rio.getParserFormatForMIMEType(connection.getContentType());
         }
         
         return format.orElse(RDFFormat.TURTLE);
     }
     
+    /**
+     * Parses the {@code inputStream} using the given {@code format}. A list of {@link VocabularyProperty properties}
+     * will be returned. Certain flags will influence the list of properties, like {@link #includeDeprecated}. 
+     * @param vocabulary vocabulary metadata, like prefix and namespace.
+     * @param format the RDF format of the {@code inputStream}, which influences the creation of the
+     *        RDF parser.
+     * @param inputStream RDF document content.
+     * @return a list of parsed vocabulary properties. 
+     * @throws MojoExecutionException if an error occures during parsing.
+     */
     private List<VocabularyProperty> parseVocabulary(Vocabulary vocabulary, RDFFormat format, InputStream inputStream) throws MojoExecutionException {
         RDFParser parser = Rio.createParser(format);
         
@@ -264,7 +306,7 @@ public class GeneratorMojo extends AbstractMojo {
             parser.parse(inputStream, "");
         } catch (IOException e) {
             getLog().warn("Could not parse " + vocabulary.getUrl() + ": " + e.getMessage(), e);
-            throw new MojoExecutionException("", e);
+            throw new MojoExecutionException("Failed to parse vocabulary: " + e.getMessage(), e);
         }
         
         if (!includeDeprecated) {
@@ -314,7 +356,15 @@ public class GeneratorMojo extends AbstractMojo {
         return vocabProperties;
     }
     
-    private void writeSourceFile(Vocabulary vocabulary, List<VocabularyProperty> properties) {
+    /**
+     * Outputs the parsed vocabulary properties to a source file. The location and content of the
+     * file can be influenced by the {@link #outputDirectory}, {@link #packageName}, and
+     * {@link #addGeneratedAnnotation} properties, among others. 
+     * @param vocabulary vocabulary metadata, like prefix and namespace.
+     * @param properties list of parsed vocabulary properties.
+     * @throws MojoExecutionException if an error occurs during file output.
+     */
+    private void writeSourceFile(Vocabulary vocabulary, List<VocabularyProperty> properties) throws MojoExecutionException {
         String template;
         switch (outputType) {
             default:
@@ -351,6 +401,7 @@ public class GeneratorMojo extends AbstractMojo {
             Files.createDirectories(root);
         } catch (IOException e) {
             getLog().warn("Could not create package hierarchy " + root + ": " + e.getMessage(), e);
+            throw new MojoExecutionException("Could not create package hierarchy: " + e.getMessage(), e);
         }
         
         String fileName = vocabulary.getPrefix().toUpperCase() + ".java";
@@ -363,6 +414,7 @@ public class GeneratorMojo extends AbstractMojo {
                 writer.write(vocab.render());
             } catch (IOException e) {
                 getLog().warn("Could not write file " + path + ": " + e.getMessage(), e);
+                throw new MojoExecutionException("Coult not write file: " + e.getMessage(), e);
             }
         }
     }
